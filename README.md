@@ -1,4 +1,3 @@
-[README (1).md](https://github.com/user-attachments/files/28687886/README.1.md)
 # 🏡 Team Smith HQ — Parker's Jobs
 
 A chore tracker for Parker Smith, backed by Supabase so every completed job is saved and tracked over time.
