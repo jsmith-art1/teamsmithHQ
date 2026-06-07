@@ -86,8 +86,12 @@
   .job-name { font-weight:800; font-size:0.95rem; color:var(--text); line-height:1.3; transition:color 0.2s; }
   .job-note { font-size:0.78rem; color:var(--muted); margin-top:2px; font-weight:600; }
   .job-date { font-size:0.75rem; font-weight:700; color:var(--green); margin-top:4px; }
-  .pay-badge { display:flex; flex-direction:column; align-items:center; flex-shrink:0; }
-  .pay-amount { font-family:'Fredoka One',cursive; font-size:1.25rem; color:var(--text); line-height:1; }
+  .pay-badge { display:flex; flex-direction:column; align-items:center; gap:4px; flex-shrink:0; }
+  .price-edit { display:flex; align-items:center; gap:2px; font-family:'Fredoka One',cursive; font-size:1.15rem; color:var(--text); line-height:1; }
+  .price-edit span { pointer-events:none; }
+  .price-input { width:52px; border:2px solid var(--border); border-radius:10px; padding:5px 6px; background:#FFFDF8; color:var(--text); font:inherit; text-align:center; }
+  .price-input:focus { outline:none; border-color:var(--green); box-shadow:0 0 0 3px rgba(61,184,122,0.16); }
+  .price-input::-webkit-outer-spin-button, .price-input::-webkit-inner-spin-button { margin:0; }
   .pay-dots { display:flex; gap:2px; margin-top:3px; }
   .pay-dots span { width:8px; height:8px; border-radius:50%; background:var(--yellow); }
   .pay-dots span.active { background:var(--orange); }
@@ -152,7 +156,6 @@
   .cat-blue   { background: #E6F2FF; color: #2a5faa; }
   .cat-orange { background: #FFF3E6; color: #b86a00; }
   .cat-pink   { background: #FFE6F3; color: #aa2a6a; }
-  .cat-yellow { background: #FFFBE6; color: #8a7000; }
 
   .footer { text-align:center; margin-top:30px; font-size:0.82rem; color:var(--muted); font-weight:600; }
   .footer strong { color:var(--text); }
@@ -187,7 +190,7 @@
         <div class="progress-bar" id="progressBar" style="width:0%"></div>
       </div>
       <div class="progress-label">
-        <span id="doneCount">0 of 16 done today</span>
+        <span id="doneCount">0 done today</span>
         <span id="maxEarn">$0 / $120 possible</span>
       </div>
     </div>
@@ -289,20 +292,30 @@ const categories = [
       { id: 15, name: "Clean Bathroom",         note: "Toilet, sink, tub & mirror",          icon: "🚿", pay: 15, color: "c1", dots: 2 },
     ]
   },
-  {
-    id: "bedroom",
-    label: "🛏️ Bedroom",
-    color: "cat-yellow",
-    jobs: [
-      { id: 16, name: "Clean Bedroom",          note: "Tidy, dust & vacuum",                 icon: "🛏️", pay: 10, color: "c2", dots: 1 },
-    ]
-  },
 ];
 
 // Flat list of all jobs (for stats & lookups)
 const jobs = categories.flatMap(c => c.jobs);
+const savedPrices = JSON.parse(localStorage.getItem('teamSmithJobPrices') || '{}');
+jobs.forEach((job) => {
+  if (savedPrices[job.id] != null) job.pay = Number(savedPrices[job.id]);
+});
 
-const totalPossible = jobs.reduce((a, b) => a + b.pay, 0);
+function totalPossible() {
+  return jobs.reduce((a, b) => a + b.pay, 0);
+}
+
+function formatMoney(amount) {
+  return Number.isInteger(amount) ? amount : amount.toFixed(2);
+}
+
+function savePrice(job, value) {
+  const nextPay = Math.max(0, Math.round(Number(value || 0) * 100) / 100);
+  job.pay = nextPay;
+  savedPrices[job.id] = nextPay;
+  localStorage.setItem('teamSmithJobPrices', JSON.stringify(savedPrices));
+  updateStats();
+}
 let done = new Set();           // job ids marked done TODAY (session)
 let completedDates = {};        // job id -> display date string
 let completionRecords = {};     // job id -> supabase row id (so we can delete on uncheck)
@@ -353,12 +366,21 @@ function render() {
           ${isDone ? `<div class="job-date">✅ Completed ${completedDates[job.id]}</div>` : ''}
         </div>
         <div class="pay-badge">
-          <div class="pay-amount">$${job.pay}</div>
+          <label class="price-edit" aria-label="Edit pay for ${job.name}">
+            <span>$</span>
+            <input class="price-input" type="number" min="0" step="1" value="${job.pay}" data-job-id="${job.id}">
+          </label>
           <div class="pay-dots">
             ${Array.from({length: job.dots}, () => `<span class="active"></span>`).join('')}
           </div>
         </div>
       `;
+      const priceInput = card.querySelector('.price-input');
+      priceInput.addEventListener('click', (event) => event.stopPropagation());
+      priceInput.addEventListener('input', (event) => savePrice(job, event.target.value));
+      priceInput.addEventListener('change', (event) => {
+        event.target.value = formatMoney(job.pay);
+      });
       card.addEventListener('click', () => toggleJob(job));
       list.appendChild(card);
     });
@@ -394,7 +416,7 @@ async function toggleJob(job) {
       done.add(job.id);
       completedDates[job.id] = formatDate(now);
       completionRecords[job.id] = data.id;
-      showToast(`💰 +$${job.pay} saved for ${job.name}!`);
+      showToast(`💰 +$${formatMoney(job.pay)} saved for ${job.name}!`);
     }
   }
   updateStats();
@@ -404,10 +426,11 @@ async function toggleJob(job) {
 // ── Update earnings banner ──
 function updateStats() {
   const earned = [...done].reduce((a, id) => a + jobs.find(j => j.id === id).pay, 0);
-  document.getElementById('earned').textContent = `$${earned}`;
+  const possible = totalPossible();
+  document.getElementById('earned').textContent = `$${formatMoney(earned)}`;
   document.getElementById('doneCount').textContent = `${done.size} of ${jobs.length} done today`;
-  document.getElementById('maxEarn').textContent = `$${earned} / $${totalPossible} possible`;
-  document.getElementById('progressBar').style.width = `${(earned / totalPossible) * 100}%`;
+  document.getElementById('maxEarn').textContent = `$${formatMoney(earned)} / $${formatMoney(possible)} possible`;
+  document.getElementById('progressBar').style.width = possible ? `${(earned / possible) * 100}%` : '0%';
 }
 
 // ── Load history from Supabase ──
@@ -424,7 +447,7 @@ async function loadHistory() {
   const totalJobs   = log.length;
   const totalEarned = log.reduce((a, r) => a + r.pay, 0);
   document.getElementById('totalJobsDone').textContent  = totalJobs;
-  document.getElementById('totalAllEarned').textContent = `$${totalEarned}`;
+  document.getElementById('totalAllEarned').textContent = `$${formatMoney(totalEarned)}`;
 
   // Summary by job
   const byJob = {};
@@ -452,7 +475,7 @@ async function loadHistory() {
             <div class="summary-name">${s.name}</div>
             <div class="summary-meta">Done ${s.count}x · Last: ${lastDate}</div>
           </div>
-          <div class="summary-earn">$${s.earned}</div>
+          <div class="summary-earn">$${formatMoney(s.earned)}</div>
         </div>`;
     }).join('');
   }
@@ -474,15 +497,15 @@ async function loadHistory() {
             <div class="log-name">${def.icon || ''} ${r.job_name}</div>
             <div class="log-date">${dateStr} at ${timeStr}</div>
           </div>
-          <div class="log-pay">+$${r.pay}</div>
+          <div class="log-pay">+$${formatMoney(r.pay)}</div>
         </div>`;
     }).join('');
   }
 }
 
 // ── Init ──
-document.getElementById('maxEarn').textContent = `$0 / $${totalPossible} possible`;
 render();
+updateStats();
 </script>
 </body>
 </html>
